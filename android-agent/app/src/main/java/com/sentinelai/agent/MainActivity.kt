@@ -4,17 +4,108 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
+    private lateinit var channel: AuthenticatedChannel
+    private lateinit var status: TextView
+    private lateinit var serverUrl: EditText
+    private lateinit var pairingCode: EditText
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 60, 40, 40) }
-        root.addView(TextView(this).apply { text = "Sentinel AI\n\nPhone companion is ready. Device actions require your explicit Android permissions."; textSize = 20f })
-        root.addView(Button(this).apply { text = "Open Accessibility Settings"; setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } })
-        root.addView(Button(this).apply { text = "Stop Agent"; setOnClickListener { stopService(Intent(this@MainActivity, SentinelAccessibilityService::class.java)) } })
+        channel = AuthenticatedChannel(this)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 60, 40, 40)
+        }
+        root.addView(TextView(this).apply {
+            text = "Sentinel AI\n\nAuthenticated phone companion"
+            textSize = 22f
+        })
+        status = TextView(this).apply { textSize = 16f; setPadding(0, 24, 0, 24) }
+        root.addView(status)
+
+        serverUrl = EditText(this).apply {
+            hint = "Production server URL (https://...)"
+            setSingleLine(true)
+        }
+        root.addView(serverUrl)
+
+        pairingCode = EditText(this).apply {
+            hint = "6-digit pairing code"
+            inputType = 2
+            setSingleLine(true)
+        }
+        root.addView(pairingCode)
+
+        root.addView(Button(this).apply {
+            text = "Pair this phone"
+            setOnClickListener { pairPhone() }
+        })
+        root.addView(Button(this).apply {
+            text = "Check authenticated channel"
+            setOnClickListener { checkChannel() }
+        })
+        root.addView(Button(this).apply {
+            text = "Open Accessibility Settings"
+            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        })
+        root.addView(Button(this).apply {
+            text = "Stop Agent"
+            setOnClickListener { stopService(Intent(this@MainActivity, SentinelAccessibilityService::class.java)) }
+        })
+        root.addView(Button(this).apply {
+            text = "Unpair phone"
+            setOnClickListener { channel.clearPairing(); updateStatus() }
+        })
+
         setContentView(root)
+        updateStatus()
     }
+
+    private fun pairPhone() {
+        val baseUrl = serverUrl.text.toString().trim()
+        val code = pairingCode.text.toString().trim()
+        if (!baseUrl.startsWith("https://") || !code.matches(Regex("\\d{6}"))) {
+            toast("Enter an HTTPS server URL and 6-digit code")
+            return
+        }
+        status.text = "Pairing…"
+        Thread {
+            val result = channel.pair(baseUrl, code)
+            runOnUiThread {
+                result.onSuccess { status.text = "Paired ✓\nDevice: ${channel.deviceId()}" }
+                    .onFailure { status.text = "Pairing failed: ${it.message}" }
+            }
+        }.start()
+    }
+
+    private fun checkChannel() {
+        val baseUrl = serverUrl.text.toString().trim()
+        if (!baseUrl.startsWith("https://")) { toast("Enter the HTTPS server URL first"); return }
+        status.text = "Checking authenticated channel…"
+        Thread {
+            val heartbeat = channel.heartbeat(baseUrl)
+            val command = if (heartbeat.isSuccess) channel.nextCommand(baseUrl) else null
+            runOnUiThread {
+                if (heartbeat.isFailure) {
+                    status.text = "Channel error: ${heartbeat.exceptionOrNull()?.message}"
+                } else {
+                    status.text = if (command?.getOrNull() == null) "Authenticated ✓\nNo pending command" else "Authenticated ✓\nCommand received"
+                }
+            }
+        }.start()
+    }
+
+    private fun updateStatus() {
+        status.text = if (channel.isPaired()) "Paired ✓\nDevice: ${channel.deviceId()}" else "Android companion: Not paired"
+    }
+
+    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 }
