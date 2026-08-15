@@ -23,7 +23,7 @@ Establish a user-authorized link between the Android agent and the web control p
 Every device request must be authenticated, bound to the registered device, timestamped by the server-side record where applicable, and rejected when expired or malformed. The server never trusts a device-provided identity without validating its credential.
 
 ## Safety boundary
-The command layer uses an explicit allow-list of supported actions. Unknown actions are rejected. Sensitive actions require an explicit confirmation in the Android app. The service must not bypass Android permissions or execute arbitrary shell commands.
+The command layer uses an explicit allow-list of supported actions. Unknown actions are rejected. Sensitive actions now enter an explicit Android confirmation gate: the action is queued in-memory and a high-priority Android notification presents **Confirm** and **Deny**. The command executes only after the user taps **Confirm**. Denied or unknown actions are not executed. The service must not bypass Android permissions or execute arbitrary shell commands.
 
 ## Secrets
 - `JWT_SECRET` and `CONTROL_PANEL_SECRET` are production deployment secrets and must never be committed.
@@ -31,8 +31,6 @@ The command layer uses an explicit allow-list of supported actions. Unknown acti
 - Pairing credentials are device-scoped and revocable by clearing the device credential; persistent revocation UI is a remaining task.
 
 ## Remaining implementation pieces
-- Android background channel service and command execution integration
-- Sensitive-action confirmation flow
 - Web status synchronization UI
 - Automated tests for expiry, replay, invalid credentials, and unknown actions
 - Persistent production storage/rate limits
