@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Sentinel AI</string>
+    <string name="accessibility_service_description">Sentinel AI can perform only actions explicitly enabled by the user.</string>
+</resources>
