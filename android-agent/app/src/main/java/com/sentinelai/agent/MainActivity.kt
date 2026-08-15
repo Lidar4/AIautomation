@@ -80,6 +80,11 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
         updateStatus()
+        if (channel.isPaired()) {
+            val savedUrl = getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE).getString(SentinelChannelService.KEY_SERVER_URL, "")
+            serverUrl.setText(savedUrl)
+            startAuthenticatedChannel()
+        }
     }
 
     private fun pairPhone() {
@@ -97,6 +102,7 @@ class MainActivity : AppCompatActivity() {
                     getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE)
                         .edit().putString(SentinelChannelService.KEY_SERVER_URL, baseUrl).apply()
                     status.text = "Paired ✓\nDevice: ${channel.deviceId()}"
+                    startAuthenticatedChannel()
                 }.onFailure { status.text = "Pairing failed: ${it.message}" }
             }
         }.start()
