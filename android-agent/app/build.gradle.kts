@@ -15,6 +15,16 @@ android {
         versionName = "1.0.0"
     }
 
+    // Keep Java and Kotlin compilation on the same JVM target for Android CI.
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
