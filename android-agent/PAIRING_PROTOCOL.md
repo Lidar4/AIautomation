@@ -3,31 +3,36 @@
 ## Goal
 Establish a user-authorized link between the Android agent and the web control panel without putting long-lived secrets in source code.
 
-## Pairing flow
-1. The web panel creates a short-lived pairing session on the server.
-2. The server returns a one-time pairing code/token with a short expiry.
-3. The user enters or confirms that code inside the Android app.
-4. The Android app exchanges the one-time code over HTTPS.
-5. The server validates the code, creates a device record, and returns a device-scoped credential.
-6. The Android app stores the credential only in Android Keystore-backed storage.
-7. The app reports a minimal online/last-seen heartbeat; no unrestricted command channel is created.
+## Implemented pairing flow
+1. The authenticated web control center calls `POST /pairing/start` with the production control secret.
+2. The server creates a cryptographically random 6-digit code valid for 5 minutes and single use.
+3. The user enters that code in the Android companion.
+4. Android calls `POST /pairing/claim` over HTTPS with the code and a stable device ID.
+5. The server validates the one-time code and returns a device-scoped JWT valid for 30 days.
+6. Android stores the JWT only in Android Keystore-backed encrypted storage.
+7. Android uses the bearer credential for heartbeat and command-channel requests.
+
+## Authenticated channel
+- `POST /devices/:deviceId/heartbeat` updates online/last-seen state.
+- `GET /channel/next` returns at most one queued command for the authenticated device.
+- `POST /channel/ack` acknowledges command handling.
+- Web control commands are accepted only with the production control secret and are bound to an already-paired device.
+- Commands are restricted to the server allow-list.
 
 ## Request validation
-Every device request must be authenticated, bound to the registered device, timestamped, and rejected when expired or malformed. The server must never trust a device-provided user/device identity without validating its credential.
+Every device request must be authenticated, bound to the registered device, timestamped by the server-side record where applicable, and rejected when expired or malformed. The server never trusts a device-provided identity without validating its credential.
 
 ## Safety boundary
-The command layer must use an explicit allow-list of supported actions. Unknown actions are rejected. Sensitive actions require an explicit confirmation in the Android app. The service must not bypass Android permissions or execute arbitrary shell commands.
+The command layer uses an explicit allow-list of supported actions. Unknown actions are rejected. Sensitive actions require an explicit confirmation in the Android app. The service must not bypass Android permissions or execute arbitrary shell commands.
 
 ## Secrets
-- No production server secret belongs in the Android source tree.
+- `JWT_SECRET` and `CONTROL_PANEL_SECRET` are production deployment secrets and must never be committed.
 - No signing keystore or private key belongs in Git.
-- Production secrets should be configured through the deployment/CI secret store.
-- Pairing credentials should be revocable from the web panel.
+- Pairing credentials are device-scoped and revocable by clearing the device credential; persistent revocation UI is a remaining task.
 
-## Next implementation pieces
-- Server pairing endpoint and request schema
-- Android pairing screen/client
-- Keystore-backed credential storage
-- Device heartbeat/status endpoint
-- Allow-list command request/response model
+## Remaining implementation pieces
+- Android background channel service and command execution integration
+- Sensitive-action confirmation flow
+- Web status synchronization UI
 - Automated tests for expiry, replay, invalid credentials, and unknown actions
+- Persistent production storage/rate limits
