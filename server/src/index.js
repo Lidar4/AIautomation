@@ -13,7 +13,6 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const CONTROL_PANEL_SECRET = process.env.CONTROL_PANEL_SECRET;
 const PAIRING_TTL_MS = 5 * 60 * 1000;
 const DEVICE_TOKEN_TTL = '30d';
-
 const devices = new Map();
 const pairingSessions = new Map();
 const commandQueues = new Map();
@@ -50,7 +49,7 @@ function auth(req, res, next) {
 function cleanExpiredPairingSessions() {
   const now = Date.now();
   for (const [id, session] of pairingSessions) {
-    if (session.expiresAt <= now || (session.claimed && session.expiresAt + 60_000 <= now)) pairingSessions.delete(id);
+    if (session.expiresAt <= now) pairingSessions.delete(id);
   }
 }
 
@@ -58,7 +57,7 @@ app.post('/pairing/start', requireControlSecret, (_req, res) => {
   cleanExpiredPairingSessions();
   const sessionId = crypto.randomUUID();
   const code = crypto.randomInt(100000, 1000000).toString();
-  pairingSessions.set(sessionId, { code, expiresAt: Date.now() + PAIRING_TTL_MS, claimed: false, deviceId: null, token: null });
+  pairingSessions.set(sessionId, { code, expiresAt: Date.now() + PAIRING_TTL_MS, claimed: false, deviceId: null });
   res.json({ sessionId, code, expiresInSeconds: PAIRING_TTL_MS / 1000 });
 });
 
@@ -67,7 +66,7 @@ app.get('/pairing/status/:sessionId', requireControlSecret, (req, res) => {
   const session = pairingSessions.get(req.params.sessionId);
   if (!session) return res.status(404).json({ error: 'pairing_session_not_found' });
   if (session.expiresAt <= Date.now()) return res.status(410).json({ error: 'pairing_session_expired' });
-  res.json({ status: session.claimed ? 'paired' : 'waiting', deviceId: session.deviceId, token: session.claimed ? session.token : null, expiresInSeconds: Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000)) });
+  res.json({ status: session.claimed ? 'paired' : 'waiting', deviceId: session.claimed ? session.deviceId : null, expiresInSeconds: Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000)) });
 });
 
 app.post('/pairing/claim', (req, res) => {
@@ -83,24 +82,33 @@ app.post('/pairing/claim', (req, res) => {
   const now = new Date().toISOString();
   devices.set(deviceId, { deviceId, connected: true, pairedAt: now, lastSeenAt: now });
   commandQueues.set(deviceId, commandQueues.get(deviceId) || []);
-  session.claimed = true; session.deviceId = deviceId; session.token = token;
+  session.claimed = true; session.deviceId = deviceId;
   pairingSessions.set(sessionId, session);
   res.json({ token, deviceId, expiresIn: DEVICE_TOKEN_TTL });
 });
+
+function deviceSnapshot(deviceId) {
+  const device = devices.get(deviceId) || { deviceId, connected: false };
+  const stale = !device.lastSeenAt || Date.now() - Date.parse(device.lastSeenAt) > 20_000;
+  return { ...device, connected: Boolean(device.connected && !stale) };
+}
 
 app.post('/devices/:deviceId/heartbeat', auth, (req, res) => {
   if (req.auth.deviceId !== req.params.deviceId) return res.status(403).json({ error: 'forbidden' });
   const device = devices.get(req.params.deviceId) || { deviceId: req.params.deviceId };
   device.connected = true; device.lastSeenAt = new Date().toISOString();
   devices.set(req.params.deviceId, device);
-  res.json({ ok: true, device });
+  res.json({ ok: true, device: deviceSnapshot(req.params.deviceId) });
 });
 
 app.get('/devices/:deviceId', auth, (req, res) => {
   if (req.auth.deviceId !== req.params.deviceId) return res.status(403).json({ error: 'forbidden' });
-  const device = devices.get(req.params.deviceId) || { deviceId: req.params.deviceId, connected: false };
-  const stale = !device.lastSeenAt || Date.now() - Date.parse(device.lastSeenAt) > 20_000;
-  res.json({ ...device, connected: Boolean(device.connected && !stale) });
+  res.json(deviceSnapshot(req.params.deviceId));
+});
+
+app.get('/control/devices/:deviceId', requireControlSecret, (req, res) => {
+  if (!devices.has(req.params.deviceId)) return res.status(404).json({ error: 'device_not_paired' });
+  res.json(deviceSnapshot(req.params.deviceId));
 });
 
 app.get('/channel/next', auth, (req, res) => {
