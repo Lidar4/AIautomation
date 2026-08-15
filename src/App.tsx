@@ -14,11 +14,13 @@ const initialPermissions = [
 ] as const;
 
 type Log = { time: string; text: string; status: string };
+type DeviceState = { connected: boolean; lastSeen?: string; deviceId?: string; status?: string };
 
 export default function App() {
   const [command, setCommand] = useState(''); const [running, setRunning] = useState(false); const [connected, setConnected] = useState(false); const [voice, setVoice] = useState(false);
   const [deviceId, setDeviceId] = useState(localStorage.getItem('sentinelDeviceId') || '');
   const [controlSecret, setControlSecret] = useState(sessionStorage.getItem('sentinelControlSecret') || ''); const [pairingCode, setPairingCode] = useState(''); const [pairingSession, setPairingSession] = useState(''); const [pairingBusy, setPairingBusy] = useState(false); const [pairingOpen, setPairingOpen] = useState(false);
+  const [deviceState, setDeviceState] = useState<DeviceState>({ connected: false });
   const [permissions, setPermissions] = useState(initialPermissions.map(([name, desc, on]) => ({ name, desc, on }))); const [logs, setLogs] = useState<Log[]>([]); const enabled = useMemo(() => permissions.filter(p => p.on).length, [permissions]);
 
   function saveControlSecret(value: string) { setControlSecret(value); if (value) sessionStorage.setItem('sentinelControlSecret', value); else sessionStorage.removeItem('sentinelControlSecret'); }
@@ -37,7 +39,15 @@ export default function App() {
     poll(); const id = window.setInterval(poll, 2000); return () => { stopped = true; window.clearInterval(id); };
   }, [pairingSession, controlSecret]);
 
-  async function sync() { if (!controlSecret || !deviceId || !API) return setConnected(false); try { const r = await fetch(`${API}/control/devices/${encodeURIComponent(deviceId)}`, { headers: { 'x-control-secret': controlSecret } }); if (!r.ok) return setConnected(false); const d = await r.json(); setConnected(Boolean(d.connected)); } catch { setConnected(false); } }
+  async function sync() {
+    if (!controlSecret || !deviceId || !API) { setConnected(false); setDeviceState({ connected: false }); return; }
+    try {
+      const r = await fetch(`${API}/control/devices/${encodeURIComponent(deviceId)}`, { headers: { 'x-control-secret': controlSecret } });
+      if (!r.ok) { setConnected(false); setDeviceState({ connected: false, deviceId }); return; }
+      const d = await r.json(); const next: DeviceState = { connected: Boolean(d.connected), lastSeen: d.lastSeen || d.last_seen, deviceId, status: d.status };
+      setDeviceState(next); setConnected(next.connected);
+    } catch { setConnected(false); setDeviceState({ connected: false, deviceId }); }
+  }
   useEffect(() => { sync(); const id = window.setInterval(sync, 5000); return () => window.clearInterval(id); }, [controlSecret, deviceId]);
 
   async function run() {
@@ -49,8 +59,8 @@ export default function App() {
     <main id="dashboard"><header><div><small>PERSONAL AI AUTOMATION</small><h1>Sentinel AI</h1><p>Command your approved phone actions from one secure control center.</p></div><div className={connected?'status connected':'status'}><Wifi size={14}/>{connected?'Android connected':'Android offline'}</div></header>
       <section className="grid"><div className="card command-card" id="commands"><div className="head"><div><small>COMMAND CENTER</small><h2>What should I do?</h2></div><button className={voice?'icon active':'icon'} onClick={()=>setVoice(v=>!v)}><Mic size={18}/></button></div><textarea value={command} onChange={e=>setCommand(e.target.value)} placeholder="Enter an approved URL…"/><div className="actions"><button className="primary" onClick={run}><Play size={15}/>{running?'Sending…':'Run command'}</button><span>{voice?'Voice mode on':'Text mode'}</span></div><div className="policy"><Shield size={17}/><span><b>Permission-first execution.</b> The agent cannot grant itself new Android permissions.</span></div></div>
         <div className="card" id="permissions"><div className="head"><div><small>PERMISSION POLICY</small><h2>{enabled} enabled</h2></div><Lock size={17}/></div>{permissions.map((p,i)=><div className="permission" key={p.name}><div><b>{p.name}</b><small>{p.desc}</small></div><button className={p.on?'toggle on':'toggle'} onClick={()=>setPermissions(x=>x.map((v,j)=>j===i?{...v,on:!v.on}:v))}><span/></button></div>)}</div>
-        <div className="card" id="android"><div className="head"><div><small>ACTIVITY LOG</small><h2>Recent commands</h2></div><Activity size={17}/></div>{logs.length===0?<div className="empty"><Command size={22}/><b>No commands yet</b><span>Approved actions will appear here.</span></div>:logs.map((l,i)=><div className="log" key={i}><time>{l.time}</time><b>{l.text}</b><span>{l.status}</span></div>)}</div>
-        <div className="card roadmap"><small>PRODUCTION BUILD</small><h2>System status</h2>{[['Web control center',true],['Policy engine',true],['Authenticated pairing session',true],['Android companion channel',true],['Accessibility service',false],['Voice pipeline',false]].map(([x,done])=><div key={String(x)}><Check size={15}/><span>{x}</span><em>{done?'READY':'BUILD NEXT'}</em><ChevronRight size={14}/></div>)}</div></section>
+        <div className="card" id="android"><div className="head"><div><small>ANDROID STATUS</small><h2>{connected?'Online':'Offline'}</h2></div><Smartphone size={17}/></div><div className="device-status-panel"><div><span className={connected?'dot on':'dot'}/><b>{connected?'Authenticated channel active':'Waiting for Android companion'}</b></div><small>{deviceState.lastSeen ? `Last seen: ${deviceState.lastSeen}` : deviceId ? 'No heartbeat received yet.' : 'No paired device selected.'}</small><button className="secondary" onClick={sync}>Refresh status</button></div><div className="head log-head"><div><small>ACTIVITY LOG</small><h2>Recent commands</h2></div><Activity size={17}/></div>{logs.length===0?<div className="empty"><Command size={22}/><b>No commands yet</b><span>Approved actions will appear here.</span></div>:logs.map((l,i)=><div className="log" key={i}><time>{l.time}</time><b>{l.text}</b><span>{l.status}</span></div>)}</div>
+        <div className="card roadmap"><small>PRODUCTION BUILD</small><h2>System status</h2>{[['Web control center',true],['Policy engine',true],['Authenticated pairing session',true],['Android companion channel',true],['Device status synchronization',true],['Accessibility service',false],['Voice pipeline',false]].map(([x,done])=><div key={String(x)}><Check size={15}/><span>{x}</span><em>{done?'READY':'BUILD NEXT'}</em><ChevronRight size={14}/></div>)}</div></section>
       <footer><span><Power size={13}/> Sentinel AI</span><span>Explicit commands only</span><span>Android permissions required for device actions</span></footer></main>
       {pairingOpen && <div className="modal-backdrop"><div className="pair-modal"><button className="modal-close" onClick={()=>setPairingOpen(false)}><X size={18}/></button><div className="pair-icon"><KeyRound size={20}/></div><small>SECURE ANDROID PAIRING</small><h2>{connected?'Android companion connected':'Pair your Android companion'}</h2><p>The control secret stays in this browser session and is never sent to the Android companion.</p><label>Server API URL<input value={API} readOnly placeholder="Set VITE_SENTINEL_API in production"/></label><label>Control secret<input type="password" value={controlSecret} onChange={e=>saveControlSecret(e.target.value)} placeholder="Your CONTROL_PANEL_SECRET"/></label><button className="primary wide" disabled={pairingBusy || !controlSecret.trim()} onClick={startPairing}>{pairingBusy?'Starting…':'Generate pairing code'}</button>{pairingCode && <div className="pair-code"><small>ENTER THIS CODE IN THE ANDROID COMPANION</small><strong>{pairingCode}</strong><span>{pairingSession?'Waiting for authenticated claim…':''}</span></div>}</div></div>}
   </div>;
