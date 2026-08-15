@@ -1,6 +1,9 @@
 package com.sentinelai.agent
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
@@ -9,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
     private lateinit var channel: AuthenticatedChannel
@@ -19,6 +23,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         channel = AuthenticatedChannel(this)
+        requestNotificationPermissionIfNeeded()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -49,6 +54,10 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { pairPhone() }
         })
         root.addView(Button(this).apply {
+            text = "Start authenticated channel"
+            setOnClickListener { startAuthenticatedChannel() }
+        })
+        root.addView(Button(this).apply {
             text = "Check authenticated channel"
             setOnClickListener { checkChannel() }
         })
@@ -58,11 +67,15 @@ class MainActivity : AppCompatActivity() {
         })
         root.addView(Button(this).apply {
             text = "Stop Agent"
-            setOnClickListener { stopService(Intent(this@MainActivity, SentinelAccessibilityService::class.java)) }
+            setOnClickListener { stopService(Intent(this@MainActivity, SentinelChannelService::class.java)) }
         })
         root.addView(Button(this).apply {
             text = "Unpair phone"
-            setOnClickListener { channel.clearPairing(); updateStatus() }
+            setOnClickListener {
+                stopService(Intent(this@MainActivity, SentinelChannelService::class.java))
+                channel.clearPairing()
+                updateStatus()
+            }
         })
 
         setContentView(root)
@@ -80,10 +93,29 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val result = channel.pair(baseUrl, code)
             runOnUiThread {
-                result.onSuccess { status.text = "Paired ✓\nDevice: ${channel.deviceId()}" }
-                    .onFailure { status.text = "Pairing failed: ${it.message}" }
+                result.onSuccess {
+                    getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE)
+                        .edit().putString(SentinelChannelService.KEY_SERVER_URL, baseUrl).apply()
+                    status.text = "Paired ✓\nDevice: ${channel.deviceId()}"
+                }.onFailure { status.text = "Pairing failed: ${it.message}" }
             }
         }.start()
+    }
+
+    private fun startAuthenticatedChannel() {
+        val baseUrl = serverUrl.text.toString().trim()
+        if (!channel.isPaired()) {
+            toast("Pair this phone first")
+            return
+        }
+        if (!baseUrl.startsWith("https://")) {
+            toast("Enter the HTTPS server URL first")
+            return
+        }
+        getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE)
+            .edit().putString(SentinelChannelService.KEY_SERVER_URL, baseUrl).apply()
+        ContextCompat.startForegroundService(this, Intent(this, SentinelChannelService::class.java))
+        status.text = "Authenticated channel started ✓"
     }
 
     private fun checkChannel() {
@@ -107,5 +139,17 @@ class MainActivity : AppCompatActivity() {
         status.text = if (channel.isPaired()) "Paired ✓\nDevice: ${channel.deviceId()}" else "Android companion: Not paired"
     }
 
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
+    }
+
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        private const val REQUEST_NOTIFICATIONS = 1001
+    }
 }
