@@ -25,6 +25,11 @@ android {
         jvmTarget = "17"
     }
 
+    // Pin Kotlin compilation to the same JDK used by the CI runner.
+    kotlin {
+        jvmToolchain(17)
+    }
+
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
