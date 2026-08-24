@@ -27,18 +27,30 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
 
-      - name: Verify Java and Gradle
+      - name: Verify Java, Android SDK and Gradle
         run: |
           java -version
+          sdkmanager --list_installed | grep -E 'platforms;android-35|build-tools;35.0.0|platform-tools' || true
           gradle --version
 
       - name: Clean and build debug APK
         run: gradle clean assembleDebug --no-daemon --stacktrace --warning-mode all
+
+      - name: Verify APK exists
+        run: |
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         if: success()
