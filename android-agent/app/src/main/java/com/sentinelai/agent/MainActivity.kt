@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(status)
 
         serverUrl = EditText(this).apply {
-            hint = "Production server URL (https://...)"
+            hint = "Server URL (https://... or local http://192.168.x.x:8787)"
             setSingleLine(true)
         }
         root.addView(serverUrl)
@@ -81,7 +81,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(root)
         updateStatus()
         if (channel.isPaired()) {
-            val savedUrl = getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE).getString(SentinelChannelService.KEY_SERVER_URL, "")
+            val savedUrl = getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE)
+                .getString(SentinelChannelService.KEY_SERVER_URL, "")
             serverUrl.setText(savedUrl)
             startAuthenticatedChannel()
         }
@@ -90,8 +91,8 @@ class MainActivity : AppCompatActivity() {
     private fun pairPhone() {
         val baseUrl = serverUrl.text.toString().trim()
         val code = pairingCode.text.toString().trim()
-        if (!baseUrl.startsWith("https://") || !code.matches(Regex("\\d{6}"))) {
-            toast("Enter an HTTPS server URL and 6-digit code")
+        if (!isSupportedServerUrl(baseUrl) || !code.matches(Regex("\\d{6}"))) {
+            toast("Use HTTPS, or HTTP only for localhost/private LAN/hotspot, plus a 6-digit code")
             return
         }
         status.text = "Pairing…"
@@ -114,8 +115,8 @@ class MainActivity : AppCompatActivity() {
             toast("Pair this phone first")
             return
         }
-        if (!baseUrl.startsWith("https://")) {
-            toast("Enter the HTTPS server URL first")
+        if (!isSupportedServerUrl(baseUrl)) {
+            toast("Enter a valid HTTPS or private LAN/hotspot HTTP server URL")
             return
         }
         getSharedPreferences(SentinelChannelService.PREFS, MODE_PRIVATE)
@@ -126,7 +127,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkChannel() {
         val baseUrl = serverUrl.text.toString().trim()
-        if (!baseUrl.startsWith("https://")) { toast("Enter the HTTPS server URL first"); return }
+        if (!isSupportedServerUrl(baseUrl)) {
+            toast("Enter a valid HTTPS or private LAN/hotspot HTTP server URL")
+            return
+        }
         status.text = "Checking authenticated channel…"
         Thread {
             val heartbeat = channel.heartbeat(baseUrl)
@@ -135,11 +139,27 @@ class MainActivity : AppCompatActivity() {
                 if (heartbeat.isFailure) {
                     status.text = "Channel error: ${heartbeat.exceptionOrNull()?.message}"
                 } else {
-                    status.text = if (command?.getOrNull() == null) "Authenticated ✓\nNo pending command" else "Authenticated ✓\nCommand received"
+                    status.text = if (command?.getOrNull() == null) {
+                        "Authenticated ✓\nNo pending command"
+                    } else {
+                        "Authenticated ✓\nCommand received"
+                    }
                 }
             }
         }.start()
     }
+
+    private fun isSupportedServerUrl(value: String): Boolean = runCatching {
+        val url = java.net.URL(value)
+        val protocol = url.protocol.lowercase()
+        if (protocol == "https") true
+        else if (protocol == "http") {
+            val host = url.host.lowercase()
+            host == "localhost" || host == "127.0.0.1" || host.endsWith(".local") ||
+                host.startsWith("10.") || host.startsWith("192.168.") ||
+                host.split('.').let { it.size >= 2 && it[0] == "172" && (it[1].toIntOrNull() ?: -1) in 16..31 }
+        } else false
+    }.getOrDefault(false)
 
     private fun updateStatus() {
         status.text = if (channel.isPaired()) "Paired ✓\nDevice: ${channel.deviceId()}" else "Android companion: Not paired"
